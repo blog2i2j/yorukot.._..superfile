@@ -92,7 +92,9 @@ func (s *sidebarModel) directoriesRender(mainPanelHeight int, curFilePanelFileLo
 	return res
 }
 
-// This also modifies the m.fileModel.filePanels
+// This also modifies the m.fileModel.filePanels, which it should not
+// what modifications we do on this model object are of no consequence.
+// Since bubblea passed this 'model' by value in View() function.
 func (m *model) filePanelRender() string {
 	// file panel
 	f := make([]string, 10)
@@ -279,8 +281,8 @@ func (m *model) processBarRender() string {
 			renderedHeight--
 		}
 
-		process := processes[i]
-		process.progress.Width = footerWidth(m.fullWidth) - 3
+		curProcess := processes[i]
+		curProcess.progress.Width = footerWidth(m.fullWidth) - 3
 		symbol := ""
 		cursor := ""
 		if i == m.processBarModel.cursor {
@@ -288,7 +290,7 @@ func (m *model) processBarRender() string {
 		} else {
 			cursor = footerCursorStyle.Render("  ")
 		}
-		switch process.state {
+		switch curProcess.state {
 		case failure:
 			symbol = processErrorStyle.Render(icon.Warn)
 		case successful:
@@ -299,9 +301,9 @@ func (m *model) processBarRender() string {
 			symbol = processCancelStyle.Render(icon.Error)
 		}
 
-		processRender += cursor + footerStyle.Render(truncateText(process.name, footerWidth(m.fullWidth)-7, "...")+" ") + symbol + "\n"
+		processRender += cursor + footerStyle.Render(truncateText(curProcess.name, footerWidth(m.fullWidth)-7, "...")+" ") + symbol + "\n"
 
-		processRender += cursor + process.progress.ViewAs(float64(process.done)/float64(process.total)) + endSeparator
+		processRender += cursor + curProcess.progress.ViewAs(float64(curProcess.done)/float64(curProcess.total)) + endSeparator
 	}
 
 	return m.wrapProcessBardBorder(processRender)
@@ -337,7 +339,7 @@ func (m *model) metadataRender() string {
 	sort.Slice(m.fileMetaData.metaData, func(i, j int) bool {
 		// Initialising a new slice in each check by sort functions is too ineffinceint.
 		// Todo : Fix it
-		comparisonFields := []string{"FileName", "FileSize", "FolderName", "FolderSize", "FileModifyDate", "FileAccessDate"}
+		comparisonFields := []string{"Name", "Size", "Date Modified", "Date Accessed"}
 
 		for _, field := range comparisonFields {
 			if m.fileMetaData.metaData[i][0] == field {
@@ -648,13 +650,22 @@ func (m *model) filePreviewPanelRender() string {
 	if len(panel.element) == 0 {
 		return box.Render("\n --- " + icon.Error + " No content to preview ---")
 	}
-
+	// This could create errors if panel.cursor ever becomes negative, or goes out of bounds
+	// We should have a panel validation function in our View() function
+	// Panel is a full fledged object with own state, its accessed and modified so many times.
+	// Ideally we dont should never access data from it via directly accessing its variables
+	// Todo : Instead we should have helper functions for panel object and access data that way
+	// like panel.GetCurrentSelectedElem() . This abstration of implemetation of panel is needed.
+	// Now this lack of abstraction has caused issues ( See PR#730 ) . And now
+	// someone needs to scan through the entire codebase to figure out which access of panel
+	// data is causing crash.
 	itemPath := panel.element[panel.cursor].location
 
-	fileInfo, err := os.Stat(itemPath)
+	// Renamed it to info_err to prevent shadowing with err below
+	fileInfo, info_err := os.Stat(itemPath)
 
-	if err != nil {
-		slog.Error("Error get file info", "error", err)
+	if info_err != nil {
+		slog.Error("Error get file info", "error", info_err)
 		return box.Render("\n --- " + icon.Error + " Error get file info ---")
 	}
 

@@ -24,17 +24,17 @@ func (m *model) changeFilePanelMode() {
 // Back to parent directory
 func (m *model) parentDirectory() {
 	panel := &m.fileModel.filePanels[m.filePanelFocusIndex]
-	panel.directoryRecord[panel.location] = directoryRecord{
+	panel.directoryRecords[panel.location] = directoryRecord{
 		directoryCursor: panel.cursor,
 		directoryRender: panel.render,
 	}
 	fullPath := panel.location
 	parentDir := filepath.Dir(fullPath)
 	panel.location = parentDir
-	directoryRecord, hasRecord := panel.directoryRecord[panel.location]
+	curDirectoryRecord, hasRecord := panel.directoryRecords[panel.location]
 	if hasRecord {
-		panel.cursor = directoryRecord.directoryCursor
-		panel.render = directoryRecord.directoryRender
+		panel.cursor = curDirectoryRecord.directoryCursor
+		panel.render = curDirectoryRecord.directoryRender
 	} else {
 		panel.cursor = 0
 		panel.render = 0
@@ -50,15 +50,15 @@ func (m *model) enterPanel() {
 	}
 
 	if panel.element[panel.cursor].directory {
-		panel.directoryRecord[panel.location] = directoryRecord{
+		panel.directoryRecords[panel.location] = directoryRecord{
 			directoryCursor: panel.cursor,
 			directoryRender: panel.render,
 		}
 		panel.location = panel.element[panel.cursor].location
-		directoryRecord, hasRecord := panel.directoryRecord[panel.location]
+		curDirectoryRecord, hasRecord := panel.directoryRecords[panel.location]
 		if hasRecord {
-			panel.cursor = directoryRecord.directoryCursor
-			panel.render = directoryRecord.directoryRender
+			panel.cursor = curDirectoryRecord.directoryCursor
+			panel.render = curDirectoryRecord.directoryRender
 		} else {
 			panel.cursor = 0
 			panel.render = 0
@@ -72,14 +72,14 @@ func (m *model) enterPanel() {
 		}
 
 		if fileInfo.Mode()&os.ModeSymlink != 0 {
-			targetPath, err := filepath.EvalSymlinks(panel.element[panel.cursor].location)
-			if err != nil {
+			targetPath, symlink_err := filepath.EvalSymlinks(panel.element[panel.cursor].location)
+			if symlink_err != nil {
 				return
 			}
 
-			targetInfo, err := os.Lstat(targetPath)
+			targetInfo, lstat_err := os.Lstat(targetPath)
 
-			if err != nil {
+			if lstat_err != nil {
 				return
 			}
 
@@ -127,16 +127,16 @@ func (m *model) sidebarSelectDirectory() {
 	m.focusPanel = nonePanelFocus
 	panel := &m.fileModel.filePanels[m.filePanelFocusIndex]
 
-	panel.directoryRecord[panel.location] = directoryRecord{
+	panel.directoryRecords[panel.location] = directoryRecord{
 		directoryCursor: panel.cursor,
 		directoryRender: panel.render,
 	}
 
 	panel.location = m.sidebarModel.directories[m.sidebarModel.cursor].location
-	directoryRecord, hasRecord := panel.directoryRecord[panel.location]
+	curDirectoryRecord, hasRecord := panel.directoryRecords[panel.location]
 	if hasRecord {
-		panel.cursor = directoryRecord.directoryCursor
-		panel.render = directoryRecord.directoryRender
+		panel.cursor = curDirectoryRecord.directoryCursor
+		panel.render = curDirectoryRecord.directoryRender
 	} else {
 		panel.cursor = 0
 		panel.render = 0
@@ -153,13 +153,16 @@ func (m *model) selectAllItem() {
 }
 
 // Select the item where cursor located (only work on select mode)
-func (m *model) singleItemSelect() {
-	panel := &m.fileModel.filePanels[m.filePanelFocusIndex] // Access the current panel
+func (panel *filePanel) singleItemSelect() {
 
 	if len(panel.element) > 0 && panel.cursor >= 0 && panel.cursor < len(panel.element) {
 		elementLocation := panel.element[panel.cursor].location
 
 		if arrayContains(panel.selected, elementLocation) {
+			// This is inefficient. Once you select 1000 items,
+			// each select / deselect operation can take 1000 operations
+			// It can be easily made constant time.
+			// Todo : (performance)convert panel.selected to a set (map[string]struct{})
 			panel.selected = removeElementByValue(panel.selected, elementLocation)
 		} else {
 			panel.selected = append(panel.selected, elementLocation)
