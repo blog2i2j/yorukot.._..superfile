@@ -4,6 +4,8 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/yorukot/superfile/src/internal/common"
 	"io"
 	"log/slog"
 	"os"
@@ -142,7 +144,7 @@ func returnDirElement(location string, displayDotFile bool, sortOptions sortOpti
 			if dirEntries[i].IsDir() != dirEntries[j].IsDir() {
 				return dirEntries[i].IsDir()
 			}
-			if Config.CaseSensitiveSort {
+			if common.Config.CaseSensitiveSort {
 				return dirEntries[i].Name() < dirEntries[j].Name() != reversed
 			} else {
 				return strings.ToLower(dirEntries[i].Name()) < strings.ToLower(dirEntries[j].Name()) != reversed
@@ -208,6 +210,10 @@ func returnDirElementBySearchString(location string, displayDotFile bool, search
 		return []element{}
 	}
 
+	if len(items) == 0 {
+		return []element{}
+	}
+
 	folderElementMap := map[string]element{}
 	fileAndDirectories := []string{}
 
@@ -260,12 +266,6 @@ func arrayContains(s []string, str string) bool {
 		}
 	}
 	return false
-}
-
-// Todo : Eventually we want to remove all such usage that can result in app exiting abruptly
-func LogAndExit(msg string, values ...any) {
-	slog.Error(msg, values...)
-	os.Exit(1)
 }
 
 func removeElementByValue(slice []string, value string) []string {
@@ -372,8 +372,8 @@ func (m *model) returnMetaData() {
 	fileInfo, err := os.Stat(filePath)
 
 	if isSymlink(filePath) {
-		_, err := filepath.EvalSymlinks(filePath)
-		if err != nil {
+		_, symlink_err := filepath.EvalSymlinks(filePath)
+		if symlink_err != nil {
 			m.fileMetaData.metaData = append(m.fileMetaData.metaData, [2]string{"Link file is broken!", ""})
 		} else {
 			m.fileMetaData.metaData = append(m.fileMetaData.metaData, [2]string{"This is a link file.", ""})
@@ -389,12 +389,12 @@ func (m *model) returnMetaData() {
 	}
 
 	if fileInfo.IsDir() {
-		m.fileMetaData.metaData = append(m.fileMetaData.metaData, [2]string{"FolderName", fileInfo.Name()})
+		m.fileMetaData.metaData = append(m.fileMetaData.metaData, [2]string{"Name", fileInfo.Name()})
 		if m.focusPanel == metadataFocus {
-			m.fileMetaData.metaData = append(m.fileMetaData.metaData, [2]string{"FolderSize", formatFileSize(dirSize(filePath))})
+			m.fileMetaData.metaData = append(m.fileMetaData.metaData, [2]string{"Size", formatFileSize(dirSize(filePath))})
 		}
-		m.fileMetaData.metaData = append(m.fileMetaData.metaData, [2]string{"FolderModifyDate", fileInfo.ModTime().String()})
-		m.fileMetaData.metaData = append(m.fileMetaData.metaData, [2]string{"FolderPermissions", fileInfo.Mode().String()})
+		m.fileMetaData.metaData = append(m.fileMetaData.metaData, [2]string{"Date Modified", fileInfo.ModTime().String()})
+		m.fileMetaData.metaData = append(m.fileMetaData.metaData, [2]string{"Permissions", fileInfo.Mode().String()})
 		message.metadata = m.fileMetaData.metaData
 		channel <- message
 		return
@@ -406,7 +406,7 @@ func (m *model) returnMetaData() {
 		return
 	}
 
-	if Config.Metadata && checkIsSymlinked.Mode()&os.ModeSymlink == 0 && et != nil {
+	if common.Config.Metadata && checkIsSymlinked.Mode()&os.ModeSymlink == 0 && et != nil {
 
 		fileInfos := et.ExtractMetadata(filePath)
 
@@ -422,12 +422,12 @@ func (m *model) returnMetaData() {
 			}
 		}
 	} else {
-		fileName := [2]string{"FileName", fileInfo.Name()}
-		fileSize := [2]string{"FileSize", formatFileSize(fileInfo.Size())}
-		fileModifyData := [2]string{"FileModifyDate", fileInfo.ModTime().String()}
-		filePermissions := [2]string{"FilePermissions", fileInfo.Mode().String()}
+		fileName := [2]string{"Name", fileInfo.Name()}
+		fileSize := [2]string{"Size", formatFileSize(fileInfo.Size())}
+		fileModifyData := [2]string{"Date Modified", fileInfo.ModTime().String()}
+		filePermissions := [2]string{"Permissions", fileInfo.Mode().String()}
 
-		if Config.EnableMD5Checksum {
+		if common.Config.EnableMD5Checksum {
 			// Calculate MD5 checksum
 			checksum, err := calculateMD5Checksum(filePath)
 			if err != nil {
@@ -466,20 +466,21 @@ func calculateMD5Checksum(filePath string) (string, error) {
 // Get directory total size
 func dirSize(path string) int64 {
 	var size int64
-	err := filepath.WalkDir(path, func(_ string, entry os.DirEntry, err error) error {
+	// Its named walk_err to prevent shadowing
+	walk_err := filepath.WalkDir(path, func(_ string, entry os.DirEntry, err error) error {
 		if err != nil {
 			slog.Error("Dir size function error", "error", err)
 		}
 		if !entry.IsDir() {
-			info, err := entry.Info()
-			if err == nil {
+			info, info_err := entry.Info()
+			if info_err == nil {
 				size += info.Size()
 			}
 		}
 		return err
 	})
-	if err != nil {
-		slog.Error("errors during WalkDir", "error", err)
+	if walk_err != nil {
+		slog.Error("errors during WalkDir", "error", walk_err)
 	}
 	return size
 }
@@ -532,10 +533,10 @@ func getElementIcon(file string, IsDir bool) icon.IconStyle {
 	ext := strings.TrimPrefix(filepath.Ext(file), ".")
 	name := file
 
-	if !Config.Nerdfont {
+	if !common.Config.Nerdfont {
 		return icon.IconStyle{
 			Icon:  "",
-			Color: theme.FilePanelFG,
+			Color: common.Theme.FilePanelFG,
 		}
 	}
 
@@ -577,9 +578,24 @@ func getElementIcon(file string, IsDir bool) icon.IconStyle {
 		if resultIcon.Color == "NONE" {
 			return icon.IconStyle{
 				Icon:  resultIcon.Icon,
-				Color: theme.FilePanelFG,
+				Color: common.Theme.FilePanelFG,
 			}
 		}
 		return resultIcon
 	}
+}
+
+// TeaUpdate : Utility to send update to model , majorly used in tests
+// Not using pointer reciever as this is more like a utility, than
+// a member function of model
+func TeaUpdate(m *model, msg tea.Msg) (tea.Cmd, error) {
+	resModel, cmd := m.Update(msg)
+
+	mObj, ok := resModel.(model)
+	if !ok {
+
+		return cmd, fmt.Errorf("unexpected model type: %T", resModel)
+	}
+	*m = mObj
+	return cmd, nil
 }

@@ -4,6 +4,8 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"github.com/yorukot/superfile/src/internal/common"
+	"github.com/yorukot/superfile/src/internal/common/utils"
 	"io"
 	"log"
 	"log/slog"
@@ -14,7 +16,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/pelletier/go-toml/v2"
 	"github.com/urfave/cli/v2"
 	variable "github.com/yorukot/superfile/src/config"
 	internal "github.com/yorukot/superfile/src/internal"
@@ -23,8 +24,12 @@ import (
 
 // Run superfile app
 func Run(content embed.FS) {
-	internal.LoadInitial_PrerenderedVariables()
-	internal.LoadAllDefaultConfig(content)
+
+	// Before we open log file, set all "non debug" logs to stdout
+	utils.SetRootLoggerToStdout(false)
+
+	common.LoadInitial_PrerenderedVariables()
+	common.LoadAllDefaultConfig(content)
 
 	app := &cli.App{
 		Name:        "superfile",
@@ -108,9 +113,8 @@ func Run(content embed.FS) {
 
 			InitConfigFile()
 
-			err := InitTrash()
 			hasTrash := true
-			if err != nil {
+			if err := InitTrash(); err != nil {
 				hasTrash = false
 			}
 
@@ -120,12 +124,14 @@ func Run(content embed.FS) {
 
 			firstUse := checkFirstUse()
 
-			go CheckForUpdates()
-
 			p := tea.NewProgram(internal.InitialModel(path, firstUse, hasTrash), tea.WithAltScreen(), tea.WithMouseCellMotion())
 			if _, err := p.Run(); err != nil {
 				log.Fatalf("Alas, there's been an error: %v", err)
 			}
+
+			// This must be after calling internal.InitialModel()
+			// so that we know `common.Config` is loaded
+			go CheckForUpdates()
 
 			if variable.PrintLastDir {
 				fmt.Println(variable.LastDir)
@@ -165,11 +171,11 @@ func InitConfigFile() {
 	}
 
 	// Write config file
-	if err := writeConfigFile(variable.ConfigFile, internal.ConfigTomlString); err != nil {
+	if err := writeConfigFile(variable.ConfigFile, common.ConfigTomlString); err != nil {
 		log.Fatalln("Error writing config file:", err)
 	}
 
-	if err := writeConfigFile(variable.HotkeysFile, internal.HotkeysTomlString); err != nil {
+	if err := writeConfigFile(variable.HotkeysFile, common.HotkeysTomlString); err != nil {
 		log.Fatalln("Error writing config file:", err)
 	}
 
@@ -198,7 +204,7 @@ func createDirectories(dirs ...string) error {
 	for _, dir := range dirs {
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
 			// Directory doesn't exist, create it
-			if err := os.MkdirAll(dir, 0755); err != nil {
+			if err = os.MkdirAll(dir, 0755); err != nil {
 				return fmt.Errorf("failed to create directory %s: %w", dir, err)
 			}
 		} else if err != nil {
@@ -214,7 +220,7 @@ func createDirectories(dirs ...string) error {
 func createFiles(files ...string) error {
 	for _, file := range files {
 		if _, err := os.Stat(file); os.IsNotExist(err) {
-			if err := os.WriteFile(file, nil, 0644); err != nil {
+			if err = os.WriteFile(file, nil, 0644); err != nil {
 				return fmt.Errorf("failed to create file %s: %w", file, err)
 			}
 		}
@@ -229,7 +235,7 @@ func checkFirstUse() bool {
 	firstUse := false
 	if _, err := os.Stat(file); os.IsNotExist(err) {
 		firstUse = true
-		if err := os.WriteFile(file, nil, 0644); err != nil {
+		if err = os.WriteFile(file, nil, 0644); err != nil {
 			log.Fatalf("Failed to create file: %v", err)
 		}
 	}
@@ -239,7 +245,7 @@ func checkFirstUse() bool {
 // Write data to the path file if it does not exists
 func writeConfigFile(path, data string) error {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+		if err = os.WriteFile(path, []byte(data), 0644); err != nil {
 			return fmt.Errorf("failed to write config file %s: %w", path, err)
 		}
 	}
@@ -248,7 +254,7 @@ func writeConfigFile(path, data string) error {
 
 func initJsonFile(path string) error {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		if err := os.WriteFile(path, []byte("null"), 0644); err != nil {
+		if err = os.WriteFile(path, []byte("null"), 0644); err != nil {
 			return fmt.Errorf("failed to initialize json file %s: %w", path, err)
 		}
 	}
@@ -268,22 +274,7 @@ func writeLastCheckTime(t time.Time) {
 // Todo : This is too big of a function. Refactor it to displayUpdateNotification, fetchLatestVersion,
 // shouldCheckForUpdates, chucks
 func CheckForUpdates() {
-	var Config internal.ConfigType
-
-	// Get AutoCheck flag from configuration files
-
-	// Todo : We are reading the config file here, and also in the loadConfigFile functions
-	// This needs to be fixed.
-	data, err := os.ReadFile(variable.ConfigFile)
-	if err != nil {
-		log.Fatalf("Config file doesn't exist: %v", err)
-	}
-	err = toml.Unmarshal(data, &Config)
-	if err != nil {
-		log.Fatalf("Error decoding config file ( your config file may be misconfigured ): %v", err)
-	}
-
-	if !Config.AutoCheckUpdate {
+	if !common.Config.AutoCheckUpdate {
 		return
 	}
 
